@@ -1,0 +1,23 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_IMAGE_TAG}
+    container_name: ${QDRANT_CONTAINER_NAME}
+    ports:
+      - "${QDRANT_GRPC_PORT}:6333"   # REST
+      - "${QDRANT_REST_PORT}:6334"   # gRPC
+    volumes:
+      - ${QDRANT_STORAGE_PATH}:/qdrant/storage
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:${POSTGRES_IMAGE_TAG}
+    container_name: ${POSTGRES_CONTAINER_NAME}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - ${POSTGRES_DATA_PATH}:/var/lib/postgresql/data
+    restart: unless-stopped

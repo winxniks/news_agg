@@ -1,0 +1,13 @@
+data/
+.env
+__pycache__/
+-p/
+backup/
+.agg-news-venv/
+plans/
+test/
+api/dop_endpoints/*
+services/dop_services/*
+models_cache/
+.vscode/
+services/vector_task_service.py
