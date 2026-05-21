@@ -13,6 +13,7 @@ from fastapi import BackgroundTasks
 
 import asyncpg
 from tqdm import tqdm
+import psutil
 
 from config import settings
 from services.database import database
@@ -26,26 +27,26 @@ from models.schemas import (
     BatchProcessResponse,
     VectorStatsResponse,
     Source,
+    FilterDate,
 )
 import uuid
 
-
-
-
-
-#удалить
-from services.embedding_service import embedding_service
-#import psycopg2
-#from qdrant_client import QdrantClient
-#from fastembed import TextEmbedding
-#from fastembed.rerank.cross_encoder import TextCrossEncoder
-
-
-
-
-
-
 logger = logging.getLogger(__name__)
+
+
+def log_system_resources(prefix: str = ""):
+    """Логирование использования памяти, CPU и диска."""
+    try:
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        logger.info(
+            f"{prefix} MEM: {mem.used / 1024**3:.2f}GB/{mem.total / 1024**3:.2f}GB "
+            f"({mem.percent}%), DISK: {disk.used / 1024**3:.2f}GB/{disk.total / 1024**3:.2f}GB "
+            f"({disk.percent}%), CPU: {cpu_percent}%"
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось получить системные метрики: {e}")
 
 
 class EmbeddingProcessor:
@@ -65,7 +66,6 @@ class EmbeddingProcessor:
         # Executor для параллельной обработки
         self.executor: Optional[ProcessPoolExecutor] = None
         
-        # Статистика обработки
         self.stats = {
             "total_chunks": 0,
             "processed_chunks": 0,
@@ -85,10 +85,8 @@ class EmbeddingProcessor:
 
     async def initialize(self):
         """Инициализация необходимых ресурсов."""
-        # Убеждаемся, что коллекция Qdrant существует
         await qdrant_service.ensure_collection()
         
-        # Создаем executor для параллельной обработки
         self.executor = ProcessPoolExecutor(max_workers=self.max_workers)
         
         logger.info("EmbeddingProcessor инициализирован")
@@ -98,6 +96,7 @@ class EmbeddingProcessor:
         offset: int,
         limit: int,
         processed_after: Optional[datetime] = None,
+        processed_before: Optional[datetime] = None,
         source: List[Source] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -106,7 +105,9 @@ class EmbeddingProcessor:
         Args:
             offset: Смещение для пагинации
             limit: Количество чанков для получения
-            processed_after: Фильтр по дате создания (только новые чанки)
+            processed_after: Фильтр по дате создания после (только новые чанки)
+            processed_before: Фильтр по дате создания до (только старые чанки)
+            source: Фильтр по источнику
         
         Returns:
             Список чанков с полями: chunk_id, doc_id, chunk_idx, chunk_text
@@ -117,7 +118,8 @@ class EmbeddingProcessor:
                 c.doc_id,
                 c.chunk_idx,
                 c.chunk_text,
-                c.valid_from_dttm,
+                d.public_dttm,
+                to_char(d.public_dttm, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS public_dttm,
                 d.doc_src
             FROM news.chunks c
             LEFT JOIN news.documents d using(doc_id)
@@ -128,8 +130,13 @@ class EmbeddingProcessor:
         param_counter = 1
         
         if processed_after:
-            query += f" AND c.valid_from_dttm >= cast(${param_counter} AS timestamptz)"
+            query += f" AND d.public_dttm >= cast(${param_counter} AS timestamptz)"
             params.append(processed_after)
+            param_counter += 1
+
+        if processed_before:
+            query += f" AND d.public_dttm <= cast(${param_counter} AS timestamptz)"
+            params.append(processed_before)
             param_counter += 1
         
         if source:
@@ -151,7 +158,7 @@ class EmbeddingProcessor:
                         "doc_id": row["doc_id"],
                         "chunk_idx": row["chunk_idx"],
                         "chunk_text": row["chunk_text"],
-                        "valid_from_dttm": row["valid_from_dttm"],
+                        "public_dttm": row["public_dttm"],
                         "doc_src": row["doc_src"]
                     })
                 
@@ -179,7 +186,6 @@ class EmbeddingProcessor:
             return 0, 0, 0
 
         try:
-            # Вставляем чанки в Qdrant (сервис сам проверяет дубликаты)
             inserted, duplicates = await qdrant_service.batch_insert_chunks(chunks)
             
             processed = len(chunks)
@@ -192,6 +198,7 @@ class EmbeddingProcessor:
     async def process_all_chunks(
         self,
         processed_after: Optional[datetime] = None,
+        processed_before: Optional[datetime] = None,
         source: List[Source] = None,
         show_progress: bool = True,
         task_id: Optional[str] = None
@@ -200,25 +207,25 @@ class EmbeddingProcessor:
         Обрабатывает все чанки из PostgreSQL.
 
         Args:
-            processed_after: Фильтр по дате создания
+            processed_after: Фильтр по дате создания после
+            processed_before: Фильтр по дате создания до
+            source: Фильтр по источнику
             show_progress: Показывать ли прогресс-бар
             task_id: Идентификатор задачи в БД для отслеживания прогресса (опционально)
 
         Returns:
             Словарь со статистикой обработки
         """
-        # Инициализация
         await self.initialize()
         
-        # Получаем общее количество чанков
-        total_chunks = await self.get_total_chunks_count_test() #get_total_chunks_count(processed_after, source)
+        total_chunks = await self.get_total_chunks_count(processed_after, processed_before, source)
         
         self.stats["total_chunks"] = total_chunks
         self.stats["start_time"] = datetime.now()
         
         logger.info(f"Начало обработки {total_chunks} чанков")
+        log_system_resources("START")
         
-        # Обновляем статус задачи, если task_id передан
         if task_id:
             try:
                 await task_storage.update_task(
@@ -230,7 +237,6 @@ class EmbeddingProcessor:
             except Exception as e:
                 logger.error(f"Не удалось обновить задачу {task_id}: {e}")
         
-        # Создаем прогресс-бар
         pbar = tqdm(
             total=total_chunks,
             desc="Обработка чанков",
@@ -238,29 +244,24 @@ class EmbeddingProcessor:
             disable=not show_progress
         ) if show_progress else None
         
-        # Обработка по батчам
         offset = 0
         batch_tasks = []
         
         while offset < total_chunks:
-            # Получаем батч чанков
-            '''chunks = await self.get_chunks_batch(
+            chunks = await self.get_chunks_batch(
                 offset=offset,
                 limit=self.batch_size,
                 processed_after=processed_after,
+                processed_before=processed_before,
                 source=source
-            )'''
-
-            chunks = await self.get_chunks_batch_test()
+            )
             
             if not chunks:
                 break
             
-            # Создаем задачу на обработку батча
             task = asyncio.create_task(self.process_chunks_batch(chunks))
             batch_tasks.append(task)
             
-            # Обновляем offset
             offset += len(chunks)
             
             # Ограничиваем количество параллельных задач
@@ -271,7 +272,6 @@ class EmbeddingProcessor:
                     return_when=asyncio.FIRST_COMPLETED
                 )
                 
-                # Обновляем статистику и прогресс
                 for done_task in done:
                     try:
                         processed, inserted, duplicates = done_task.result()
@@ -279,10 +279,10 @@ class EmbeddingProcessor:
                         self.stats["inserted_chunks"] += inserted
                         self.stats["duplicate_chunks"] += duplicates
                         
-                        # Обновляем прогресс задачи, если task_id передан
+                        log_system_resources(f"BATCH processed={processed}, inserted={inserted}, duplicates={duplicates}")
+                        
                         if task_id:
                             try:
-                                # Обновляем результат с текущей статистикой
                                 await task_storage.update_task(
                                     task_id=task_id,
                                     result=self.stats.copy()
@@ -306,7 +306,6 @@ class EmbeddingProcessor:
             for result in results:
                 if isinstance(result, Exception):
                     logger.error(f"Ошибка в задаче обработки: {result}")
-                    # Оцениваем количество неудачных чанков приблизительно
                     self.stats["failed_chunks"] += self.batch_size
                 else:
                     processed, inserted, duplicates = result
@@ -317,11 +316,9 @@ class EmbeddingProcessor:
                     if pbar:
                         pbar.update(processed)
         
-        # Завершаем прогресс-бар
         if pbar:
             pbar.close()
         
-        # Завершаем статистику
         self.stats["end_time"] = datetime.now()
         self.stats["processing_time"] = (
             self.stats["end_time"] - self.stats["start_time"]
@@ -330,7 +327,6 @@ class EmbeddingProcessor:
         self.stats["end_time"] = self.stats["end_time"].isoformat()
         self.stats["start_time"] = self.stats["start_time"].isoformat()
         
-        # Логируем результаты
         logger.info(
             f"Обработка завершена: "
             f"обработано={self.stats['processed_chunks']}, "
@@ -353,18 +349,22 @@ class EmbeddingProcessor:
             except Exception as e:
                 logger.error(f"Не удалось обновить задачу {task_id} как завершенную: {e}")'''
         
+        log_system_resources("FINISH")
         return self.stats.copy()
 
     async def get_total_chunks_count(
         self,
         processed_after: Optional[datetime] = None,
+        processed_before: Optional[datetime] = None,
         source: List[Source] = None
     ) -> int:
         """
         Возвращает общее количество чанков в PostgreSQL.
         
         Args:
-            processed_after: Фильтр по дате создания
+            processed_after: Фильтр по дате создания после
+            processed_before: Фильтр по дате создания до
+            source: Фильтр по источнику
         
         Returns:
             Количество чанков
@@ -380,14 +380,20 @@ class EmbeddingProcessor:
         param_counter = 1
         
         if processed_after:
-            query += f" AND c.valid_from_dttm >= cast(${param_counter} AS timestamptz)"
+            query += f" AND d.public_dttm >= cast(${param_counter} AS timestamptz)"
             params.append(processed_after)
+            param_counter += 1
+
+        if processed_before:
+            query += f" AND d.public_dttm <= cast(${param_counter} AS timestamptz)"
+            params.append(processed_before)
             param_counter += 1
         
         if source:
-            query += f" AND d.doc_src = ${param_counter}"
+            placeholders = ', '.join([f'${i}' for i in range(param_counter, param_counter + len(source))])
+            query += f" AND d.doc_src IN ({placeholders})"
             params.append(source)
-        
+
         try:
             async with database.get_connection() as conn:
                 result = await conn.fetchval(query, *params)
@@ -404,7 +410,10 @@ class EmbeddingProcessor:
         text: str,
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
-        use_reranker: bool = True
+        use_filter: FilterDate = FilterDate.NO,
+        filter_date: Optional[datetime] = None,
+        use_rescore: bool = True,
+        use_reranker: bool = True,
     ) -> VectorSearchResponse:
         """
         Поиск дубликатов для входного текста.
@@ -416,16 +425,18 @@ class EmbeddingProcessor:
         Возвращает найденные чанки с оценками схожести.
         """
         start_time = datetime.now()
+        logger.info(f"Начало поиска дубликатов")
         
-        # Выполняем поиск дубликатов
         results = await qdrant_service.search_duplicates_by_text(
             text=text,
             top_k=top_k,
             similarity_threshold=similarity_threshold,
-            use_reranker=use_reranker
+            use_filter=use_filter,
+            filter_date=filter_date,
+            use_rescore=use_rescore,
+            use_reranker=use_reranker,
         )
         
-        # Преобразуем результаты в формат ответа
         duplicate_results = []
         duplicates_found = 0
         
@@ -437,6 +448,8 @@ class EmbeddingProcessor:
             duplicate_results.append(DuplicateResult(
                 chunk_id=payload.get("chunk_id", 0),
                 doc_id=payload.get("doc_id", 0),
+                doc_src=payload.get("source", ""),
+                doc_public_dttm=payload.get("public_dttm", None),
                 similarity_score=result["score"],
                 reranker_score=result.get("reranker_score"),
                 final_score=result.get("final_score"),
@@ -444,7 +457,6 @@ class EmbeddingProcessor:
                 is_duplicate=is_duplicate
             ))
         processing_time_ms = (datetime.now() - start_time).total_seconds() * 1000
-        # Получаем размер эмбеддинга
         return VectorSearchResponse(
             query_text=text,
             results=duplicate_results,
@@ -452,12 +464,19 @@ class EmbeddingProcessor:
             total_found=len(results),
             duplicates_found=duplicates_found
         )
-
+    
     async def get_vector_stats(self) -> VectorStatsResponse:
         """
         Возвращает статистику по векторной БД.
         """
         collection_info = await qdrant_service.get_collection_info()
+        
+        warnings_value = collection_info.get("warnings", "None")
+        if isinstance(warnings_value, list):
+            warnings_value = ", ".join(warnings_value) if warnings_value else "None"
+        elif not warnings_value:
+            warnings_value = "None"
+        
         return VectorStatsResponse(
             collection_name=settings.QDRANT_COLLECTION_NAME,
             vectors_count=collection_info.get("vectors_count", 0),
@@ -471,7 +490,7 @@ class EmbeddingProcessor:
             indexed_vectors_count=collection_info.get("indexed_vectors_count", 0),
             indexed_vectors_size=collection_info.get("indexed_vectors_size", 0),
             segments_count=collection_info.get("segments_count", 0),
-            warnings=collection_info.get("warnings", "None"),
+            warnings=warnings_value,
             vectors_config=collection_info.get("vectors_config", {}),
             optimizers_config=collection_info.get("optimizers_config", {}),
             hnsw_config=collection_info.get("hnsw_config", {}),
@@ -530,7 +549,6 @@ class EmbeddingProcessor:
         parameters = task.get("parameters", {})
         result = task.get("result", {})
         
-        # Извлекаем статистику из result (если задача завершена)
         if result and isinstance(result, dict):
             processed_chunks = result.get("processed_chunks", 0)
             inserted_chunks = result.get("inserted_chunks", 0)
@@ -538,12 +556,10 @@ class EmbeddingProcessor:
             failed_chunks = result.get("failed_chunks", 0)
             processing_time = result.get("processing_time", 0.0)
         
-        # Вычисляем скорость обработки
         processing_speed = 0.0
         if processing_time > 0:
             processing_speed = processed_chunks / processing_time
         
-        # Оцениваем время завершения, если задача в процессе
         estimated_completion_time = None
         if task["status"] == TaskStatus.RUNNING and processing_speed > 0:
             total_chunks = parameters.get("total_chunks", 0)
@@ -570,6 +586,7 @@ class EmbeddingProcessor:
     async def execute_batch_task(
         self,
         processed_after: Optional[datetime],
+        processed_before: Optional[datetime],
         source: List[Source],
         show_progress: bool,
         background_tasks: BackgroundTasks
@@ -579,6 +596,7 @@ class EmbeddingProcessor:
         """
         parameters = {
             "processed_after": processed_after.isoformat() if processed_after else None,
+            "processed_before": processed_before.isoformat() if processed_before else None,
             "show_progress": show_progress
         }
 
@@ -593,6 +611,7 @@ class EmbeddingProcessor:
         background_tasks.add_task(
             self._run_batch_processing,
             processed_after=processed_after,
+            processed_before=processed_before,
             show_progress=show_progress,
             source=source,
             task_id=str(task_id)
@@ -621,12 +640,12 @@ class EmbeddingProcessor:
         self,
         task_id: str,
         processed_after: Optional[datetime],
+        processed_before: Optional[datetime],
         source: List[Source],
         show_progress: bool
     ):
         """Фоновая задача для выполнения batch-обработки."""
         try:
-            # Обновляем статус задачи на "в процессе"
             await task_storage.update_task(
                 task_id=uuid.UUID(task_id),
                 status=TaskStatus.RUNNING,
@@ -635,15 +654,14 @@ class EmbeddingProcessor:
             
             logger.info(f"Начало обработки задачи {task_id}")
             
-            # Выполняем обработку с передачей task_id для отслеживания прогресса
             stats = await self.process_all_chunks(
                 processed_after=processed_after,
+                processed_before=processed_before,
                 source=source,
                 show_progress=show_progress,
                 task_id=task_id
             )
             
-            # Обновляем задачу как завершенную с результатами
             await task_storage.update_task(
                 task_id=uuid.UUID(task_id),
                 status=TaskStatus.COMPLETED,
@@ -655,7 +673,6 @@ class EmbeddingProcessor:
             
         except Exception as e:
             logger.error(f"Ошибка при выполнении задачи {task_id}: {e}")
-            # Обновляем задачу как неудачную
             try:
                 await task_storage.update_task(
                     task_id=uuid.UUID(task_id),
@@ -685,85 +702,17 @@ class EmbeddingProcessor:
             return 0.0
         
         return self.stats["processed_chunks"] / self.stats["processing_time"]
-
-
-    async def get_chunks_batch_test(
-        self
-    ) -> List[Dict[str, Any]]:
+    
+    async def delete_collection(self, collection_name: str):
         """
-        Получает батч чанков из PostgreSQL.
+        Удаление коллекции Qdrant.
         
         Args:
-            offset: Смещение для пагинации
-            limit: Количество чанков для получения
-            processed_after: Фильтр по дате создания (только новые чанки)
+            collection_name: Имя коллекции
         
         Returns:
-            Список чанков с полями: chunk_id, doc_id, chunk_idx, chunk_text
+            Флаг успешности удаления и инфоративное сообщение
         """
-        query = """
-            SELECT 
-                c.chunk_id,
-                c.doc_id,
-                c.chunk_idx,
-                c.chunk_text,
-                c.valid_from_dttm,
-                d.doc_src
-            FROM news.chunks_test c
-            LEFT JOIN news.documents d using(doc_id)
-            WHERE 1=1
-            """
-        try:
-            async with database.get_connection() as conn:
-                rows = await conn.fetch(query)
-                
-                chunks = []
-                for row in rows:
-                    chunks.append({
-                        "chunk_id": row["chunk_id"],
-                        "doc_id": row["doc_id"],
-                        "chunk_idx": row["chunk_idx"],
-                        "chunk_text": row["chunk_text"],
-                        "valid_from_dttm": row["valid_from_dttm"],
-                        "doc_src": row["doc_src"]
-                    })
-                
-                logger.debug(f"Получено {len(chunks)} чанков")
-                return chunks
-            
-        except Exception as e:
-            logger.error(f"Ошибка при получении чанков: {e}")
-            return []
+        return await qdrant_service.delete_collection(collection_name)
 
-    async def get_total_chunks_count_test(
-        self
-    ) -> int:
-        """
-        Возвращает общее количество чанков в PostgreSQL.
-        
-        Args:
-            processed_after: Фильтр по дате создания
-        
-        Returns:
-            Количество чанков
-        """
-        query = """
-            SELECT COUNT(*) AS count 
-            FROM news.chunks_test c
-            LEFT JOIN news.documents d using(doc_id)
-            WHERE 1=1
-            """
-        
-        try:
-            async with database.get_connection() as conn:
-                result = await conn.fetchval(query)
-                
-                logger.info(f"Всего чанков в БД: {result}")
-                return result
-            
-        except Exception as e:
-            logger.error(f"Ошибка при подсчете чанков: {e}")
-            return 0
-
-# Глобальный экземпляр процессора для использования в приложении
 embedding_processor = EmbeddingProcessor()

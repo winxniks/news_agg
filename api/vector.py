@@ -46,7 +46,10 @@ async def search_duplicates(
             text=request.text,
             top_k=request.top_k,
             similarity_threshold=request.similarity_threshold,
-            use_reranker=request.use_reranker
+            use_filter=request.use_filter,
+            filter_date=request.filter_date,
+            use_rescore=request.use_rescore,
+            use_reranker=request.use_reranker,
         )
         logger.info(
             f"Поиск дубликатов выполнен: текст='{request.text[:50]}...', "
@@ -72,6 +75,7 @@ async def process_batch(
     # Создаем задачу и добавляем фоновую задачу через embedding_processor
     response = await embedding_processor.execute_batch_task(
         processed_after=request.processed_after,
+        processed_before=request.processed_before,
         source=request.source,
         show_progress=request.show_progress,
         background_tasks=background_tasks
@@ -81,7 +85,7 @@ async def process_batch(
 
 
 @router.get("/tasks/{task_id}", response_model=BatchProcessResponse)
-async def get_batch_status(task_id: str) -> BatchProcessResponse:
+async def get_task_status(task_id: str) -> BatchProcessResponse:
     """
     Получение статуса batch-задачи.
     
@@ -99,7 +103,7 @@ async def get_batch_status(task_id: str) -> BatchProcessResponse:
 
 
 @router.get("/tasks", response_model=List[BatchProcessResponse])
-async def list_vector_tasks(
+async def list_tasks(
     limit: int = 20,
     offset: int = 0,
     status: Optional[TaskStatus] = None
@@ -125,7 +129,7 @@ async def list_vector_tasks(
 
 
 @router.get("/info", response_model=VectorStatsResponse)
-async def get_vector_info() -> VectorStatsResponse:
+async def get_info() -> VectorStatsResponse:
     """
     Получение статистики по векторной БД.
     
@@ -141,7 +145,7 @@ async def get_vector_info() -> VectorStatsResponse:
 
 
 @router.get("/health")
-async def vector_health_check() -> Dict[str, Any]:
+async def health_check() -> Dict[str, Any]:
     """
     Проверка здоровья векторных сервисов.
     
@@ -153,23 +157,15 @@ async def vector_health_check() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Ошибка при проверке здоровья: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при проверке здоровья: {str(e)}")
-    
-@router.post("/test_batch", response_model=BatchProcessResponse)
-async def process_batch(
-    request: BatchProcessRequest,
-    background_tasks: BackgroundTasks
-) -> BatchProcessResponse:
+
+@router.post("/delete_collection", response_model=str)
+async def delete_collection(
+    collection_name: str
+) -> str:
     """
-    Запуск batch-обработки чанков.
-    
-    Задача выполняется в фоновом режиме. Возвращается task_id для отслеживания статуса.
+    Удаление коллекции.
+
     """
-    # Создаем задачу и добавляем фоновую задачу через embedding_processor
-    response = await embedding_processor.execute_batch_task(
-        processed_after=request.processed_after,
-        source=request.source,
-        show_progress=request.show_progress,
-        background_tasks=background_tasks
-    )
+    response, message = await embedding_processor.delete_collection(collection_name)
     
-    return response
+    return message

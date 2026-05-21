@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: str = "5432"
     POSTGRES_DB: str = "postgres"
+
+    API_KEY: str = ""
+    CLUSTER_ENDPOINT: str = ""
     
     # База данных
     @property
@@ -52,11 +55,11 @@ class Settings(BaseSettings):
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
     QDRANT_GRPC_PORT: int = 6334
-    QDRANT_COLLECTION_NAME: str = "news_test" #news
-    VECTOR_DIMENSION: int = 1024  # 384 для paraphrase-multilingual-MiniLM-L12-v2 - можно для title - токенов 128 
+    QDRANT_COLLECTION_NAME: str = "news" #news
+    VECTOR_DIMENSION: int = 1024  # 384 для paraphrase-multilingual-MiniLM-L12-v2 - можно для title - токенов 128
     SIMILARITY_THRESHOLD: float = 0.7 #0.93  # порог для дубликатов (переписанные новости)
-    DUPLICATE_THRESHOLD: float = 0.98  # порог для дубликатов (точные дубликаты)
-    BATCH_SIZE: int = 100  # размер батча для обработки
+    DUPLICATE_THRESHOLD: float = 0.99  # порог для дубликатов (точные дубликаты)
+    BATCH_SIZE: int = 100  # размер батча для обработки (уменьшено с 100 для тестирования)
     TOP_K: int = 10  # количество результатов для релевантности
     DISTANCE: str = "cosine"
 
@@ -66,7 +69,7 @@ class Settings(BaseSettings):
     EMBEDDING_CACHE_SIZE: int = 1000  # размер кэша эмбеддингов
 
     # Параллельная обработка
-    EMBEDDING_MAX_WORKERS: int = 4  # количество воркеров для многопроцессной обработки
+    EMBEDDING_MAX_WORKERS: int = 1  # количество воркеров для многопроцессной обработки (уменьшено с 4 для тестирования)
     EMBEDDING_BATCH_SIZE: int = 32  # размер батча для инференса модели
     
     class Config:

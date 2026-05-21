@@ -10,4 +10,3 @@ api/dop_endpoints/*
 services/dop_services/*
 models_cache/
 .vscode/
-services/vector_task_service.py

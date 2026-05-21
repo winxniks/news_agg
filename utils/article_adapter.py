@@ -1,7 +1,7 @@
 import logging
 from typing import List, Dict, Any
 from datetime import datetime
-from savers.db_saver import Article
+from services.parsing_db_saver import Article
 
 logger = logging.getLogger(__name__)
 

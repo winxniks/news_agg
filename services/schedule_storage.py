@@ -6,7 +6,7 @@ from models.schemas import Source, ScheduleRequest
 from services.database import database
 
 
-class PostgreSQLScheduleStorage:
+class ScheduleStorage:
     """PostgreSQL хранилище расписаний парсинга."""
 
     def __init__(self):
@@ -32,7 +32,7 @@ class PostgreSQLScheduleStorage:
 
         async with pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO parsing.parsing_schedules 
+                INSERT INTO parsing.schedules 
                 (schedule_id, cron_expression, sources, parameters, enabled, 
                  created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -49,7 +49,7 @@ class PostgreSQLScheduleStorage:
                 SELECT 
                     schedule_id, cron_expression, sources, parameters, enabled,
                     last_run, next_run, created_at, updated_at
-                FROM parsing.parsing_schedules 
+                FROM parsing.schedules 
                 WHERE schedule_id = $1
             """, schedule_id)
 
@@ -120,7 +120,7 @@ class PostgreSQLScheduleStorage:
 
         params.append(schedule_id)  # WHERE condition
         query = f"""
-            UPDATE parsing.parsing_schedules 
+            UPDATE parsing.schedules 
             SET {', '.join(updates)}
             WHERE schedule_id = ${param_index}
         """
@@ -135,7 +135,7 @@ class PostgreSQLScheduleStorage:
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM parsing.parsing_schedules WHERE schedule_id = $1",
+                "DELETE FROM parsing.schedules WHERE schedule_id = $1",
                 schedule_id
             )
             return "DELETE 1" in result
@@ -154,7 +154,7 @@ class PostgreSQLScheduleStorage:
             SELECT 
                 schedule_id, cron_expression, sources, parameters, enabled,
                 last_run, next_run, created_at, updated_at
-            FROM parsing.parsing_schedules
+            FROM parsing.schedules
             {where_clause}
             ORDER BY created_at DESC
         """
@@ -187,16 +187,16 @@ class PostgreSQLScheduleStorage:
 
         if enabled is None:
             async with pool.acquire() as conn:
-                count = await conn.fetchval("SELECT COUNT(*) FROM parsing.parsing_schedules")
+                count = await conn.fetchval("SELECT COUNT(*) FROM parsing.schedules")
                 return count
         else:
             async with pool.acquire() as conn:
                 count = await conn.fetchval(
-                    "SELECT COUNT(*) FROM parsing.parsing_schedules WHERE enabled = $1",
+                    "SELECT COUNT(*) FROM parsing.schedules WHERE enabled = $1",
                     enabled
                 )
                 return count
 
 
 # Глобальный экземпляр хранилища (для совместимости)
-postgres_schedule_storage = PostgreSQLScheduleStorage()
+schedule_storage = ScheduleStorage()

@@ -24,6 +24,11 @@ class Source(str, Enum):
     RBC = "rbc"
     RIA = "ria"
 
+class FilterDate(str, Enum):
+    NOW = "now"
+    DATE = "date"
+    NO = "no"
+
 
 # Запросы парсинга
 class LastHoursRequest(BaseModel):
@@ -133,18 +138,22 @@ class VectorSearchRequest(BaseModel):
     text: str
     top_k: int = Field(5, ge=1, le=100, description="Количество ближайших соседей для поиска")
     similarity_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Порог схожести для фильтрации")
+    use_filter: Optional[FilterDate] = Field(FilterDate.NO, description="Фильтр по дате (новости за последние 24 часа) для поиска дубликатов")
+    filter_date: Optional[str] = Field(None, description="Дата для фильтрации (используется с FilterDate.DATE)", examples=["2026-01-01T23:59:59"])
+    use_rescore: bool = Field(True, description="Использовать ли rescore на исходных векторах с oversampling для повышения релевантности")
     use_reranker: bool = Field(True, description="Использовать ли reranker для переранжирования")
-
 
 class DuplicateResult(BaseModel):
     """Результат поиска дубликата."""
-    chunk_id: int
-    doc_id: int
-    similarity_score: float
+    chunk_id: Optional[int]
+    doc_id: Optional[int]
+    doc_src: Optional[Source] = None
+    doc_public_dttm: Optional[str] = None
+    similarity_score: Optional[float] = None
     reranker_score: Optional[float] = None
     final_score: Optional[float] = None
-    chunk_text: str
-    is_duplicate: bool = Field(..., description="Является ли найденный чанк дубликатом по порогу")
+    is_duplicate: Optional[bool] = Field(..., description="Является ли найденный чанк дубликатом по порогу")
+    chunk_text: Optional[str] = None
 
 
 class VectorSearchResponse(BaseModel):
@@ -158,9 +167,10 @@ class VectorSearchResponse(BaseModel):
 
 class BatchProcessRequest(BaseModel):
     """Запрос на запуск batch-обработки чанков."""
-    processed_after: Optional[datetime] = Field(None, description="Обрабатывать только чанки созданные после этой даты")
+    processed_after: Optional[datetime] = Field(None, description="Обрабатывать только чанки созданные после этой даты", examples=["2026-01-01T09:00:00"])
+    processed_before: Optional[datetime] = Field(None, description="Обрабатывать только чанки созданные до этой даты", examples=["2026-01-01T09:00:00"])
     show_progress: bool = Field(True, description="Показывать ли прогресс-бар в логах")
-    source: List[Source] = Field(None, description="Обрабатывать только чанки из указанного источника")
+    source: Optional[List[Source]] = Field(None, description="Обрабатывать только чанки из указанного источника")
 
 
 class BatchProcessResponse(BaseModel):

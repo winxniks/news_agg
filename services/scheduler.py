@@ -11,7 +11,7 @@ from models.schemas import LastHoursRequest, LastMinutesRequest, IntervalRequest
 from config import settings
 from models.schemas import Source, ScheduleRequest
 from services.parsing_service import parsing_service
-from services.postgres_schedule_storage import postgres_schedule_storage
+from services.schedule_storage import schedule_storage
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class Scheduler:
 
     async def _restore_schedules(self):
         """Восстанавливает расписания из базы данных."""
-        schedules = await postgres_schedule_storage.list_schedules(enabled=True)
+        schedules = await schedule_storage.list_schedules(enabled=True)
         for schedule in schedules:
             schedule_id = schedule["schedule_id"]
             schedule_request = ScheduleRequest(
@@ -64,7 +64,7 @@ class Scheduler:
 
     async def add_schedule(self, schedule_request: ScheduleRequest) -> uuid.UUID:
         """Добавляет новое расписание."""
-        schedule_id = await postgres_schedule_storage.create_schedule(schedule_request)
+        schedule_id = await schedule_storage.create_schedule(schedule_request)
 
         schedule_dict = {
             "sources": schedule_request.sources,
@@ -83,7 +83,7 @@ class Scheduler:
         )
         
         # Обновляем next_run в БД
-        await postgres_schedule_storage.update_schedule(
+        await schedule_storage.update_schedule(
             schedule_id,
             next_run=job.next_run_time
         )
@@ -103,7 +103,7 @@ class Scheduler:
             self.scheduler.remove_job(job_id)
         
         # Удаляем из БД
-        success = await postgres_schedule_storage.delete_schedule(schedule_id)
+        success = await schedule_storage.delete_schedule(schedule_id)
         if success:
             logger.info(f"Удалено расписание {schedule_id}")
         return success
@@ -121,7 +121,7 @@ class Scheduler:
             job.pause()
         
         # Обновляем в БД
-        success = await postgres_schedule_storage.update_schedule(
+        success = await schedule_storage.update_schedule(
             schedule_id,
             enabled=enabled
         )
@@ -131,7 +131,7 @@ class Scheduler:
 
     async def run_schedule_now(self, schedule_id: uuid.UUID) -> bool:
         """Немедленный запуск расписания."""
-        schedule = await postgres_schedule_storage.get_schedule(schedule_id)
+        schedule = await schedule_storage.get_schedule(schedule_id)
         if not schedule:
             return False
         
@@ -144,7 +144,7 @@ class Scheduler:
         logger.info(f"Запуск запланированной задачи {schedule_id}")
         
         # Обновляем время последнего запуска в БД
-        await postgres_schedule_storage.update_schedule(
+        await schedule_storage.update_schedule(
             schedule_id,
             last_run=datetime.now()
         )
@@ -221,11 +221,11 @@ class Scheduler:
 
     async def get_schedule(self, schedule_id: uuid.UUID) -> Optional[Dict[str, Any]]:
         """Возвращает информацию о расписании."""
-        return await postgres_schedule_storage.get_schedule(schedule_id)
+        return await schedule_storage.get_schedule(schedule_id)
 
     async def list_schedules(self) -> list:
         """Возвращает список всех расписаний."""
-        return await postgres_schedule_storage.list_schedules()
+        return await schedule_storage.list_schedules()
 
 # Глобальный экземпляр планировщика
 scheduler = Scheduler()

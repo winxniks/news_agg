@@ -37,7 +37,7 @@ class TaskStorage:
 
         async with pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO parsing.parsing_tasks 
+                INSERT INTO parsing.tasks 
                 (task_id, task_type, sources, parameters, status, created_at)
                 VALUES ($1, $2, $3, $4, $5, $6)
             """, task_id, task_type.value, sources_list, parameters_json, 
@@ -53,7 +53,7 @@ class TaskStorage:
                 SELECT 
                     task_id, task_type, sources, parameters, status,
                     created_at, started_at, finished_at, result, error_message
-                FROM parsing.parsing_tasks 
+                FROM parsing.tasks 
                 WHERE task_id = $1
             """, task_id)
 
@@ -124,7 +124,7 @@ class TaskStorage:
 
         params.append(task_id)  # WHERE condition
         query = f"""
-            UPDATE parsing.parsing_tasks 
+            UPDATE parsing.tasks 
             SET {', '.join(updates)}
             WHERE task_id = ${param_index}
         """
@@ -166,7 +166,7 @@ class TaskStorage:
             SELECT 
                 task_id, task_type, sources, parameters, status,
                 created_at, started_at, finished_at, result, error_message
-            FROM parsing.parsing_tasks
+            FROM parsing.tasks
             {where_clause}
             ORDER BY created_at DESC
             LIMIT ${param_idx} OFFSET ${param_idx + 1}
@@ -205,12 +205,12 @@ class TaskStorage:
 
         if status is None:
             async with pool.acquire() as conn:
-                count = await conn.fetchval("SELECT COUNT(*) FROM parsing.parsing_tasks")
+                count = await conn.fetchval("SELECT COUNT(*) FROM parsing.tasks")
                 return count
         else:
             async with pool.acquire() as conn:
                 count = await conn.fetchval(
-                    "SELECT COUNT(*) FROM parsing.parsing_tasks WHERE status = $1",
+                    "SELECT COUNT(*) FROM parsing.tasks WHERE status = $1",
                     status.value
                 )
                 return count

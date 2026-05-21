@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from config import settings
 from models.schemas import Source, TaskStats
-from savers.db_saver import get_db_saver
+from services.parsing_db_saver import get_db_saver
 from utils.article_adapter import adapt_news_list
 
 

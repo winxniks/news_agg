@@ -58,8 +58,6 @@ DROP TABLE IF EXISTS docs_tags_lnk CASCADE;
 CREATE TABLE docs_tags_lnk (
 	doc_id BIGINT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
     tag_id BIGINT NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
-    valid_from_dttm TIMESTAMPTZ DEFAULT NOW(),
-    changed_dttm TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (tag_id, doc_id)
 );
 

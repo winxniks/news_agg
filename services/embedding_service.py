@@ -6,7 +6,6 @@
 import asyncio
 import logging
 from typing import List, Optional, Tuple, Union, Any
-from functools import lru_cache
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
@@ -71,7 +70,7 @@ class EmbeddingService:
         self,
         texts: List[str],
         batch_size: Optional[int] = None
-    ) -> List[np.ndarray]: #List[Any]:
+    ) -> List[np.ndarray]:
         """
         Вычисляет эмбеддинги для батча текстов.
         
@@ -111,7 +110,7 @@ class EmbeddingService:
             logger.error(f"Ошибка при вычислении эмбеддингов: {e}")
             raise
 
-    async def encode_single(self, text: str) -> np.ndarray: #Any: #
+    async def encode_single(self, text: str) -> np.ndarray: #Any:
         """
         Вычисляет эмбеддинг для одного текста.
         
@@ -124,34 +123,6 @@ class EmbeddingService:
         embeddings = await self.encode_batch([text])
         return embeddings[0] if embeddings else np.array([])
 
-    '''@lru_cache(maxsize=settings.EMBEDDING_CACHE_SIZE)
-    def _cached_encode_sync(self, text: str) -> np.ndarray:
-        """
-        Синхронное кэшированное вычисление эмбеддинга.
-        Используется для часто повторяющихся текстов.
-        """
-
-        model = self.primary_model
-        embeddings = list(model.embed([text], batch_size=1))
-        return embeddings[0] if embeddings else np.array([])
-
-    async def encode_cached(
-        self,
-        text: str,
-    ) -> np.ndarray:
-        """
-        Вычисляет эмбеддинг с использованием кэша.
-        
-        Args:
-            text: Текст для обработки
-        
-        Returns:
-            Numpy массив с эмбеддингом
-        """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._cached_encode_sync, text
-        )'''
 
     async def rerank(
         self,
@@ -170,19 +141,14 @@ class EmbeddingService:
         Returns:
             Список кортежей (индекс кандидата, score)
         """
+        logger.info(f"Начало переранжирования {len(candidates)} кандидатов")
+
         if not candidates:
             return []
 
-        # Используем TextCrossEncoder для переранжирования
         loop = asyncio.get_event_loop()
         
-        #def compute_rerank_sync():
-            # TextCrossEncoder.rerank возвращает список словарей с ключами 'index' и 'score'
-            #results = self.reranker_model.rerank(query, candidates)
-            #return [(i, score) for i, score in enumerate(results)]
-        
         try:
-            #scores = await loop.run_in_executor(None, compute_rerank_sync)
             scores = await loop.run_in_executor(
                 None, 
                 lambda: list(self.reranker_model.rerank(query, candidates))
@@ -193,13 +159,10 @@ class EmbeddingService:
 
         indexed_scores = list(enumerate(scores))
 
-        # Сортируем по убыванию score (уже отсортировано в results, но на всякий случай)
-        indexed_scores.sort(key=lambda x: x[1], reverse=True)
-
         if top_k is None:
             top_k = self.top_k
             
-        return scores[:top_k]
+        return indexed_scores[:top_k]
 
     async def close(self):
         """Освобождение ресурсов."""
@@ -214,5 +177,4 @@ class EmbeddingService:
             self._executor.shutdown(wait=False)
 
 
-# Глобальный экземпляр сервиса для использования в приложении
 embedding_service = EmbeddingService()

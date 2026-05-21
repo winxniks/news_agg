@@ -221,7 +221,7 @@ class DBSaver:
                 encoding_name=self.ENCODING_NAME,
                 chunk_size=self.CHUNK_SIZE,
                 chunk_overlap=self.CHUNK_OVERLAP,
-                separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
+                separators=["\n\n", "\n", ". ", "! ", "? ", ", ", " — ", " - ", " ", ""],
                 keep_separator=False, 
                 strip_whitespace=True
             )

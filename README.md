@@ -20,16 +20,7 @@ FastAPI приложение для парсинга новостей с сай�
   - Создание периодических задач с cron-выражениями
   - Включение/выключение расписаний
   - Немедленный запуск
-
-- **Экспорт данных**:
-  - Экспорт в CSV или JSON
-  - Фильтрация по источникам и датам
-  - Сжатие (gzip)
-
-- **Мониторинг**:
-  - Health check системы
-  - Статус парсеров
-  - Статистика
+  - Отслеживание статуса расписаний
 
 ## Установка
 
@@ -43,8 +34,16 @@ FastAPI приложение для парсинга новостей с сай�
 
 1. Клонируйте репозиторий:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/winxniks/news_agg.git
    cd news_agg
+   ```
+
+2. Поднимите контейнеры с базами данных (на данный момент используется облачное решение Qdrant):
+   ```bash
+   mkdir data\qdrant
+   mkdir data\postgres
+
+   docker-compose up -d
    ```
 
 2. Создайте виртуальное окружение:
@@ -56,7 +55,7 @@ FastAPI приложение для парсинга новостей с сай�
 
 3. Установите зависимости:
    ```bash
-   pip install -r requirements-fastapi.txt
+   pip install -r requirements.txt
    ```
 
 4. Настройте базу данных:
@@ -69,7 +68,7 @@ FastAPI приложение для парсинга новостей с сай�
 
 5. Настройте переменные окружения:
    - Скопируйте `.env.example` в `.env`
-   - Отредактируйте `.env` (укажите DATABASE_URL и другие параметры)
+   - Отредактируйте `.env`
 
 6. Запустите приложение:
    ```bash
@@ -122,7 +121,7 @@ curl -X POST "http://localhost:8000/api/v1/export" \
     "end": "2026-04-12T00:00:00Z",
     "sources": ["lenta", "rbc"],
     "format": "csv"
-  }' --output news_export.csv
+  }'
 ```
 
 #### Проверка здоровья системы
@@ -134,46 +133,45 @@ curl "http://localhost:8000/api/v1/health"
 
 ```
 news_agg/
-├── api/endpoints/          # Эндпоинты FastAPI
-│   ├── parsing.py          # Парсинг
-│   ├── schedule.py         # Расписание
-│   ├── export.py           # Экспорт
-│   └── monitoring.py       # Мониторинг
-├── models/                 # Pydantic схемы
-├── services/               # Бизнес-логика
-│   ├── parser_service.py   # Управление парсерами
-│   ├── task_manager.py     # Хранилище задач
-│   ├── parsing_service.py  # Сервис парсинга
-│   ├── scheduler.py        # Планировщик
-│   ├── export_service.py   # Экспорт данных
-│   └── database.py         # Подключение к БД
-├── parsers/                # Существующие парсеры
-├── savers/                 # Сохранение данных
-├── utils/                  # Вспомогательные утилиты
-├── sql_scripts/            # SQL скрипты
-├── test/                   # Тесты
-├── config.py               # Конфигурация
-├── main.py                 # Точка входа FastAPI
-├── requirements-fastapi.txt
-└── README.md
-```
-
-## Разработка
-
-### Запуск тестов
-```bash
-pytest test/
-```
-
-### Форматирование кода
-```bash
-black .
-isort .
-```
-
-### Линтинг
-```bash
-flake8
+├── api/                    # FastAPI роутеры
+│   ├── __init__.py
+│   ├── parsing.py         # API для парсинга новостей
+│   ├── schedule.py        # API для управления расписанием
+│   └── vector.py          # API для операций с векторами
+├── parsers/               # Парсеры новостных сайтов
+│   ├── __init__.py
+│   ├── base_parser.py     # Базовый класс парсера
+│   ├── lenta.py           # Парсер Lenta.ru
+│   ├── rbc.py             # Парсер RBC
+│   └── ria.py             # Парсер RIA
+├── services/              # Бизнес-логика и сервисы
+│   ├── __init__.py
+│   ├── database.py            # Подключение к PostgreSQL
+│   ├── embedding_processor.py # Сервис управления задачами эмбеддингов
+│   ├── embedding_service.py   # Сервис эмбеддингов
+│   ├── parser_service.py      # Сервис парсинга
+│   ├── parsing_service.py     # Сервис управления задачами парсинга
+│   ├── parsing_db_saver.py    # Сохранение в БД PostgreSQL результатов парсинга
+│   ├── schedule_storage.py    # Хранилище расписаний
+│   ├── qdrant_service.py      # Сервис взаимодействия с векторной БД Qdrant
+│   ├── scheduler.py           # Планировщик задач
+│   └── task_manager.py        # Менеджер задач
+├── models/                # Модели данных и схемы
+│   ├── __init__.py
+│   └── schemas.py         # Pydantic схемы
+├── utils/                 # Вспомогательные утилиты
+│   ├── __init__.py
+│   ├── article_adapter.py # Адаптер статей
+│   └── logger.py          # Настройка логирования
+├── sql_scripts/           # SQL скрипты создания таблиц и индексов
+│   ├── create_news_tables.sql
+│   └── create_mange_tables.sql
+├── .env.example           # Переменные окружения
+├── config.py              # Конфигурация приложения
+├── main.py                # Точка входа FastAPI
+├── docker-compose.yaml    # Docker Compose конфигурация
+├── requirements.txt       # Зависимости Python
+└── README.md              # Документация
 ```
 
 ## Лицензия

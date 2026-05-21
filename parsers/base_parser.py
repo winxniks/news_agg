@@ -77,6 +77,11 @@ class BaseParser(ABC):
         """Парсит детали отдельной статьи"""
         pass
     
+    @abstractmethod
+    def get_news_in_interval(self, start_datetime, end_datetime):
+        """Получает новости в заданном временном диапазоне"""
+        pass
+
     def fetch_page(
         self,
         url,

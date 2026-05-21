@@ -3,7 +3,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 from config import settings
-from savers.db_saver import init_db_saver, db_saver as global_db_saver
+from services.parsing_db_saver import init_db_saver, db_saver as global_db_saver
 
 
 class Database:
