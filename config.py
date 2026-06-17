@@ -68,6 +68,19 @@ class Settings(BaseSettings):
     RERANKER_MODEL_NAME: str = "jinaai/jina-reranker-v2-base-multilingual"
     EMBEDDING_CACHE_SIZE: int = 1000  # размер кэша эмбеддингов
 
+    # LLM
+    LLM_API_KEY: str = ""
+    LLM_NAME: str = "gpt-5.4-nano"
+    LLM_ENDPOINT: str = "https://ask.chadgpt.ru/api/public/"
+    LLM_MAX_TOKENS: int = 10000
+    LLM_TIMEOUT: int = 30
+    LLM_TEMPERATURE: float = 0.1
+    LLM_MAX_CANDIDATES: int = 10
+    LLM_PROMPT_FILE: str = "prompts/duplicate_analysis_prompt.txt"
+    @property
+    def LLM_FULL_URL(self) -> str:
+        return f"{self.LLM_ENDPOINT}{self.LLM_NAME}"
+
     # Параллельная обработка
     EMBEDDING_MAX_WORKERS: int = 1  # количество воркеров для многопроцессной обработки (уменьшено с 4 для тестирования)
     EMBEDDING_BATCH_SIZE: int = 32  # размер батча для инференса модели

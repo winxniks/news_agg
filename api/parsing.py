@@ -12,7 +12,7 @@ from models.schemas import (
 )
 from services.parsing_service import parsing_service
 
-router = APIRouter(prefix="/parse", tags=["Парсинг"])
+router = APIRouter(prefix="/parse", tags=["Parsing"])
 
 
 @router.post("/last_hours", status_code=202, response_model=ParsingTaskResponse)

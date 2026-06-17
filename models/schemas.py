@@ -24,10 +24,10 @@ class Source(str, Enum):
     RBC = "rbc"
     RIA = "ria"
 
-class FilterDate(str, Enum):
+'''class FilterDate(str, Enum):
     NOW = "now"
     DATE = "date"
-    NO = "no"
+    NO = "no"'''
 
 
 # Запросы парсинга
@@ -138,10 +138,10 @@ class VectorSearchRequest(BaseModel):
     text: str
     top_k: int = Field(5, ge=1, le=100, description="Количество ближайших соседей для поиска")
     similarity_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Порог схожести для фильтрации")
-    use_filter: Optional[FilterDate] = Field(FilterDate.NO, description="Фильтр по дате (новости за последние 24 часа) для поиска дубликатов")
-    filter_date: Optional[str] = Field(None, description="Дата для фильтрации (используется с FilterDate.DATE)", examples=["2026-01-01T23:59:59"])
+    filter_date: Optional[str] = Field(None, description="Дата для фильтрации (фильтрация включается при указании даты)", examples=["2026-01-01T23:59:59"])
     use_rescore: bool = Field(True, description="Использовать ли rescore на исходных векторах с oversampling для повышения релевантности")
     use_reranker: bool = Field(True, description="Использовать ли reranker для переранжирования")
+    use_llm: bool = Field(False, description="Включить анализ дубликатов через LLM")
 
 class DuplicateResult(BaseModel):
     """Результат поиска дубликата."""
@@ -163,6 +163,8 @@ class VectorSearchResponse(BaseModel):
     processing_time_ms: float
     total_found: int
     duplicates_found: int
+    llm_analysis: Optional[str] = Field(None, description="Текстовый анализ дубликатов от LLM")
+    llm_processing_time_ms: Optional[float] = Field(None, description="Время обработки LLM в миллисекундах")
 
 
 class BatchProcessRequest(BaseModel):

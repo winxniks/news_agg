@@ -46,6 +46,8 @@ FastAPI приложение для парсинга новостей с сай�
    docker-compose up -d
    ```
 
+  Если используете локальный Qdrant, то он будет доступен по адресу: http://localhost:6333
+
 2. Создайте виртуальное окружение:
    ```bash
    python -m venv venv
@@ -149,6 +151,7 @@ news_agg/
 │   ├── database.py            # Подключение к PostgreSQL
 │   ├── embedding_processor.py # Сервис управления задачами эмбеддингов
 │   ├── embedding_service.py   # Сервис эмбеддингов
+│   ├── llm_service.py         # Сервис анализа LLM
 │   ├── parser_service.py      # Сервис парсинга
 │   ├── parsing_service.py     # Сервис управления задачами парсинга
 │   ├── parsing_db_saver.py    # Сохранение в БД PostgreSQL результатов парсинга

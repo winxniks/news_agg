@@ -21,11 +21,7 @@ from services.embedding_processor import embedding_processor
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix=f"{settings.API_V1_PREFIX}/vector",
-    tags=["Векторные операции"],
-    responses={404: {"description": "Not found"}},
-)
+router = APIRouter(prefix="/vector", tags=["Vector"])
 
 
 @router.post("/search_duplicates", response_model=VectorSearchResponse)
@@ -35,25 +31,27 @@ async def search_duplicates(
     """
     Поиск дубликатов для входного текста.
     
-    Выполняет двухэтапный поиск:
-    1. Primary search по косинусному сходству в Qdrant
-    2. Reranking с помощью reranker модели (если включено)
+    Выполняет трехэтапный поиск:
+    1. Embedding search по косинусному сходству в Qdrant
+    2. Reranking с помощью reranker модели (если включен use_reranker)
+    3. LLM анализ дубликатов (если включен use_llm)
     
-    Возвращает найденные чанки с оценками схожести.
+    Возвращает найденные чанки с оценками схожести и анализ LLM.
     """
     try:
         response = await embedding_processor.search_duplicates(
             text=request.text,
             top_k=request.top_k,
             similarity_threshold=request.similarity_threshold,
-            use_filter=request.use_filter,
             filter_date=request.filter_date,
             use_rescore=request.use_rescore,
             use_reranker=request.use_reranker,
+            use_llm=request.use_llm,
         )
         logger.info(
             f"Поиск дубликатов выполнен: текст='{request.text[:50]}...', "
             f"найдено={response.total_found}, дубликатов={response.duplicates_found}, "
+            f"LLM={'да' if request.use_llm else 'нет'}, "
             f"время={response.processing_time_ms:.2f}мс"
         )
         return response
@@ -129,7 +127,7 @@ async def list_tasks(
 
 
 @router.get("/info", response_model=VectorStatsResponse)
-async def get_info() -> VectorStatsResponse:
+async def get_collection_info() -> VectorStatsResponse:
     """
     Получение статистики по векторной БД.
     
@@ -158,7 +156,7 @@ async def health_check() -> Dict[str, Any]:
         logger.error(f"Ошибка при проверке здоровья: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при проверке здоровья: {str(e)}")
 
-@router.post("/delete_collection", response_model=str)
+@router.delete("/delete_collection", response_model=str)
 async def delete_collection(
     collection_name: str
 ) -> str:

@@ -16,9 +16,7 @@ from services.database import database
 
 from config import settings
 from services.embedding_service import embedding_service
-from models.schemas import (
-    FilterDate
-)
+#from models.schemas import (FilterDate)
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +126,7 @@ class QdrantService:
                 vectors_config={"text": models.VectorParams(
                     size=self.vector_dimension,  # CLIP embeddings are 512-dimensional
                     distance=self.distance,  # Use cosine similarity
-                    #datatype=models.Datatype.FLOAT16,  # Use float16 for memory efficiency
+                    #datatype=models.Datatype.FLOAT32,  # Use float16 for memory efficiency
                     on_disk=True  # Store vectors on disk to handle large dataset
                 )},
                 quantization_config=models.BinaryQuantization(
@@ -205,7 +203,7 @@ class QdrantService:
                 points=point_structs,
                 wait=True,
                 parallel=4,
-                max_retries=2 #3
+                max_retries=2
             )
 
             logger.info(f"Вставлено {len(points)} точек")
@@ -218,7 +216,6 @@ class QdrantService:
     async def search_duplicates(
         self,
         vector: List[float],
-        use_filter: FilterDate,
         filter_date: Optional[datetime],
         use_rescore: bool,
         top_k: Optional[int] = None,
@@ -229,6 +226,8 @@ class QdrantService:
         
         Args:
             vector: Вектор запроса
+            filter_date: Дата для фильтрации
+            use_rescore: Флаг для использования rescore
             top_k: Количество ближайших соседей для поиска
             similarity_threshold: Порог схожести (если None, используется настройка из конфига)
         
@@ -241,14 +240,10 @@ class QdrantService:
         if top_k is None:
             top_k = self.top_k
 
-        search_filter = None   
-        if use_filter != FilterDate.NO:
-            if use_filter == FilterDate.NOW:
-                gte_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-                lte_date = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-            elif use_filter == FilterDate.DATE:
-                gte_date = (datetime.fromisoformat(filter_date) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-                lte_date = datetime.fromisoformat(filter_date).strftime("%Y-%m-%dT%H:%M:%SZ")
+        search_filter = None         
+        if filter_date:
+            gte_date = (datetime.fromisoformat(filter_date) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            lte_date = datetime.fromisoformat(filter_date).strftime("%Y-%m-%dT%H:%M:%SZ")
 
             search_filter = Filter(
                 must=[
@@ -265,18 +260,18 @@ class QdrantService:
         try:
             search_result = self.client.query_points(
                 collection_name=self.collection_name,
-                query_filter=search_filter,
+                query_filter=search_filter, # предварительная фильтрация по дате,если не None
                 query=vector,
                 using="text",
                 limit=top_k,
                 score_threshold=similarity_threshold,
                 with_payload=True, # возвращает метаданные в результате
-                with_vectors=False, # не возвращает эмбеддинги в результате False
+                with_vectors=False, # не возвращает эмбеддинги в результате
                 search_params=models.SearchParams(
                     quantization=models.QuantizationSearchParams(
                         ignore=False, # игнорирование квантованных векторов
                         rescore=use_rescore, # повторная оценка на исходных векторах
-                        oversampling=2.0, # сколько (x2 в данном случае) дополнительных векторов должно быть предварительно отобрано с помощью квантованного индекса, а затем переоценено с использованием исходных векторов
+                        oversampling=5.0, # сколько (x2 в данном случае) дополнительных векторов должно быть предварительно отобрано с помощью квантованного индекса, а затем переоценено с использованием исходных векторов
                     ),
                     #hnsw_ef=128 # количество ближайших соседей для поиска
                 ),
@@ -302,7 +297,6 @@ class QdrantService:
     async def search_duplicates_by_text(
         self,
         text: str,
-        use_filter: FilterDate,
         filter_date: Optional[datetime],
         use_rescore: bool,
         use_reranker: bool,
@@ -314,10 +308,10 @@ class QdrantService:
         
         Args:
             text: Текст для поиска
+            filter_date: Дата для фильтрации
             top_k: Количество ближайших соседей для поиска
             similarity_threshold: Порог схожести
             use_reranker: Использовать ли reranker для переранжирования
-            use_filter: Использовать фильтр по дате
             use_rescore: Использовать повторную оценку
         
         Returns:
@@ -338,7 +332,6 @@ class QdrantService:
             vector=vector,
             top_k=primary_top_k,
             similarity_threshold=similarity_threshold,
-            use_filter=use_filter,
             filter_date=filter_date,
             use_rescore=use_rescore
         )
@@ -385,14 +378,10 @@ class QdrantService:
         for idx, score in rerank_scores:
             result = primary_results[idx].copy()
             result["reranker_score"] = score
-            result["final_score"] = (result["score"] + score) / 2  # Среднее
             reranked_results.append(result)
-        
-        if similarity_threshold is not None:
-            reranked_results = [
-                r for r in reranked_results 
-                if r["final_score"] >= similarity_threshold
-            ]
+
+        # Сортировка по убыванию reranker_score
+        reranked_results.sort(key=lambda x: x["reranker_score"], reverse=True)
 
         return reranked_results[:top_k]
 

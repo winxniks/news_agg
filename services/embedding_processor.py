@@ -19,6 +19,7 @@ from config import settings
 from services.database import database
 from services.qdrant_service import qdrant_service
 from services.task_manager import task_storage
+from services.llm_service import llm_service
 from models.schemas import (
     TaskStatus,
     TaskType,
@@ -27,7 +28,6 @@ from models.schemas import (
     BatchProcessResponse,
     VectorStatsResponse,
     Source,
-    FilterDate,
 )
 import uuid
 
@@ -62,6 +62,7 @@ class EmbeddingProcessor:
         self.max_workers = max_workers or settings.EMBEDDING_MAX_WORKERS
         self.batch_size = settings.BATCH_SIZE
         self.similarity_threshold = settings.SIMILARITY_THRESHOLD
+        self.llm_max_candidates = settings.LLM_MAX_CANDIDATES
         
         # Executor для параллельной обработки
         self.executor: Optional[ProcessPoolExecutor] = None
@@ -410,10 +411,10 @@ class EmbeddingProcessor:
         text: str,
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
-        use_filter: FilterDate = FilterDate.NO,
         filter_date: Optional[datetime] = None,
         use_rescore: bool = True,
         use_reranker: bool = True,
+        use_llm: bool = False,
     ) -> VectorSearchResponse:
         """
         Поиск дубликатов для входного текста.
@@ -421,8 +422,9 @@ class EmbeddingProcessor:
         Выполняет двухэтапный поиск:
         1. Primary search по косинусному сходству в Qdrant
         2. Reranking с помощью reranker модели (если включено)
+        3. LLM анализ дубликатов (если включен use_llm)
         
-        Возвращает найденные чанки с оценками схожести.
+        Возвращает найденные чанки с оценками схожести и анализ LLM.
         """
         start_time = datetime.now()
         logger.info(f"Начало поиска дубликатов")
@@ -431,7 +433,6 @@ class EmbeddingProcessor:
             text=text,
             top_k=top_k,
             similarity_threshold=similarity_threshold,
-            use_filter=use_filter,
             filter_date=filter_date,
             use_rescore=use_rescore,
             use_reranker=use_reranker,
@@ -452,17 +453,45 @@ class EmbeddingProcessor:
                 doc_public_dttm=payload.get("public_dttm", None),
                 similarity_score=result["score"],
                 reranker_score=result.get("reranker_score"),
-                final_score=result.get("final_score"),
                 chunk_text=payload.get("chunk_text", ""),
                 is_duplicate=is_duplicate
             ))
+        
         processing_time_ms = (datetime.now() - start_time).total_seconds() * 1000
+        
+        # LLM анализ (если включен)
+        llm_analysis = None
+        llm_processing_time_ms = None
+        llm_max_candidates = self.llm_max_candidates
+        
+        if use_llm and duplicate_results:
+            llm_start_time = datetime.now()
+            
+            # Ограничиваем количество кандидатов
+            candidates_for_llm = duplicate_results[:llm_max_candidates]
+            
+            logger.info(
+                f"Запуск LLM анализа для {len(candidates_for_llm)} кандидатов "
+                f"(из {len(duplicate_results)} найденных)"
+            )
+            
+            llm_analysis = await llm_service.analyze_duplicates(
+                query_text=text,
+                filter_date=filter_date if filter_date else None,
+                candidates=candidates_for_llm,
+            )
+            
+            llm_processing_time_ms = (datetime.now() - llm_start_time).total_seconds() * 1000
+            logger.info(f"LLM анализ завершен за {llm_processing_time_ms:.2f}мс")
+        
         return VectorSearchResponse(
             query_text=text,
             results=duplicate_results,
             processing_time_ms=processing_time_ms,
             total_found=len(results),
-            duplicates_found=duplicates_found
+            duplicates_found=duplicates_found,
+            llm_analysis=llm_analysis,
+            llm_processing_time_ms=llm_processing_time_ms,
         )
     
     async def get_vector_stats(self) -> VectorStatsResponse:

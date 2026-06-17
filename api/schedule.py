@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from models.schemas import ScheduleRequest, ScheduleResponse
 from services.scheduler import scheduler
 
-router = APIRouter(prefix="/schedule", tags=["Расписание"])
+router = APIRouter(prefix="/schedule", tags=["Shedule"])
 
 
 @router.post("", response_model=ScheduleResponse)
